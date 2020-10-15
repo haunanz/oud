@@ -16,4 +16,47 @@ muduo github地址:https://github.com/chenshuo/muduo
 
 准备写个简单的文档来描述这个网络库的处理逻辑。  
 准备写示例程序演示功能。  
-准备单元测试和功能测试。  
+准备单元测试和功能测试。 
+
+## 示例
+获取
+`go get github.com/haunanz/oud`
+
+简单的回声服务器。
+```go 
+package main
+
+import (
+	"fmt"
+	"syscall"
+
+	"github.com/haunanz/oud"
+)
+
+func main() {
+	loop := oud.NewEventLoop()
+	addr := syscall.SockaddrInet4{Port: 12345}
+	server := oud.NewTCPServer(loop, &addr, "server name")
+	server.SetConnectionCallback(onConnection)
+	server.SetMessageCallback(onMessage)
+
+	server.Start()
+	loop.Loop()
+
+}
+
+// 处理连接的建立
+func onConnection(conn *oud.TCPConnection) {
+	if conn.Connected() {
+		fmt.Printf("%s is connected\n", conn.Name())
+	} 
+}
+
+// 处理消息
+func onMessage(conn *oud.TCPConnection, buf *oud.Buffer) {
+	data := buf.ReadSlice()
+	fmt.Printf("%s recive %d bytes in:%d\n", conn.Name(), len(data), conn.FD())
+	conn.Send(data)
+	buf.Retrieve(len(data))
+}
+```
