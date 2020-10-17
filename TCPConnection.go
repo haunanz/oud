@@ -17,7 +17,7 @@ type TCPConnection struct {
 	sockfd                int
 	channel               *Channel
 	localAddr             syscall.Sockaddr
-	peerrAddr             syscall.Sockaddr
+	peerAddr              syscall.Sockaddr
 	connectionCallback    func(*TCPConnection)
 	messageCallback       func(*TCPConnection, *Buffer)
 	closeCallback         func(*TCPConnection)
@@ -36,11 +36,10 @@ func NewTCPConnection(loop *EventLoop, name string, sockfd int,
 		sockfd:    sockfd,
 		channel:   NewChannel(loop, sockfd),
 		localAddr: localAddr,
-		peerrAddr: peerAddr,
+		peerAddr: peerAddr,
 		inputBuf:  NewBuffer(),
 		outputBuf: NewBuffer(),
 	}
-	// TODO channel 的回调函数还不完善
 
 	c.channel.SetReadCallback(func() {
 		c.handleRead()
@@ -77,7 +76,7 @@ func (c *TCPConnection) Name() string {
 
 // PeerAddr 返回peerAddr
 func (c *TCPConnection) PeerAddr() syscall.Sockaddr {
-	return c.peerrAddr
+	return c.peerAddr
 }
 
 // FD 返回文件描述符
@@ -228,6 +227,7 @@ func (c *TCPConnection) Send(p []byte) {
 		nwrote, err = syscall.Write(c.sockfd, p) // 直接写
 		if err != nil {                          // 出现错误
 			log.Println("TCPConnection Send  Write Err:", err)
+			nwrote = 0
 		}
 	}
 

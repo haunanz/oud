@@ -50,7 +50,7 @@ func (p *epoll) fillActiveChannels(numEvents int, activeChannels *[]*Channel) {
 			channel.SetRevents(p.events[i].Events)
 			*activeChannels = append(*activeChannels, channel)
 		} else {
-			log.Fatalf("FD:%d no exist\n", p.events[i].Fd)
+			log.Fatalf("epoll.fillActiveChannels FD:%d not exist\n", p.events[i].Fd)
 		}
 	}
 }
@@ -60,6 +60,10 @@ func (p *epoll) Poll(timeoutMs int, activeChannels *[]*Channel) {
 	if numEvents == len(p.events) { // 满了-扩容
 		tmp := make([]syscall.EpollEvent, 2*numEvents)
 		copy(tmp, p.events)
+
+		// 扩容之后 注意截断
+		// 应为后面是空值
+		tmp = tmp[:numEvents]
 		p.events = tmp
 		log.Printf("Poller.events 扩容:%d -> %d \n", numEvents, 2*numEvents)
 	}
@@ -99,7 +103,7 @@ func (p *epoll) UpdateChannel(channel *Channel) {
 		// 更新一个存在的channel
 		// idx :=channel.Index()
 		event := syscall.EpollEvent{
-
+			Fd:     int32(channel.FD()),
 			Events: channel.Events(),
 		}
 		err := syscall.EpollCtl(p.epfd, syscall.EPOLL_CTL_MOD, channel.FD(), &event)

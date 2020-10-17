@@ -168,6 +168,7 @@ func (c *Channel) OwnerLoop() *EventLoop {
 	return c.loop
 }
 
+// channel->loop->poller->poll
 func (c *Channel) update() {
 	c.loop.updateChannel(c)
 	return

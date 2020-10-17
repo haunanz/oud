@@ -1,8 +1,10 @@
 package oud
 
 import (
+	"fmt"
 	"log"
 	"strconv"
+	"sync"
 	"syscall"
 )
 
@@ -14,10 +16,11 @@ type TCPServer struct {
 	connectionCallback    func(*TCPConnection)
 	messageCallback       func(*TCPConnection, *Buffer)
 	writeCompleteCallback func(*TCPConnection)
-	
-	started               bool
-	nextConnID            int
-	connectionMap         map[string]*TCPConnection
+
+	started       bool
+	nextConnID    int
+	connectionMap map[string]*TCPConnection
+	mutex         sync.Mutex
 }
 
 // NewTCPServer 创建一个TCPServer
@@ -30,28 +33,38 @@ func NewTCPServer(loop *EventLoop, listenAddr syscall.Sockaddr, name string) *TC
 		nextConnID:    1,
 		connectionMap: map[string]*TCPConnection{},
 	}
-	server.acceptor.SetNewConnectionCallback(server.NewConnection())
+	server.acceptor.SetNewConnectionCallback(server.newConnection())
 	return server
 }
 
-// NewConnection 返回一个闭包
-//
+// newConnection 返回一个闭包
+// 建立新的连接时 会调用这个函数
+// loop->poller->channel->acceptor->tcpserver(this)
 // type NewConnectionCallback func(sockfd int, peerAddr syscall.Sockaddr)
-func (s *TCPServer) NewConnection() NewConnectionCallback {
+func (s *TCPServer) newConnection() NewConnectionCallback {
 	return func(sockfd int, peerAddr syscall.Sockaddr) {
 		connName := s.name + strconv.Itoa(s.nextConnID)
 		s.nextConnID++
-		log.Printf("TCPServer.NewConnection [%s]- new conn [%s] from %v\n", s.name, connName, peerAddr)
+
+		inet4 := peerAddr.(*syscall.SockaddrInet4)
+		addrStr := fmt.Sprintf("%v:%v", inet4.Addr, inet4.Port)
+
+		log.Printf("TCPServer.NewConnection [%s]-new conn [%s] from %s\n", s.name, connName, addrStr)
 		localAddr := s.acceptor.GetListenAddr()
 
-		conn := NewTCPConnection(s.loop,
+		// 选择负载最少的Loop传入
+		ioLoop := s.loop.getNextLoop()
+		conn := NewTCPConnection(
+			ioLoop,
 			connName,
 			sockfd,
 			localAddr,
 			peerAddr,
 		)
 
+		s.mutex.Lock()
 		s.connectionMap[connName] = conn
+		s.mutex.Unlock()
 
 		conn.SetConnectionCallback(s.connectionCallback)
 		conn.SetMessageCallback(s.messageCallback)
@@ -60,13 +73,17 @@ func (s *TCPServer) NewConnection() NewConnectionCallback {
 		})
 		conn.SetWriteCompleteCallback(s.writeCompleteCallback)
 
-		conn.ConnectEstablished()
-
+		// 指定loop中建立连接
+		s.loop.runInLoop(ioLoop, func() {
+			conn.ConnectEstablished()
+			ioLoop.connectNum++
+		})
 	}
 }
 
 // Start ->acceptor.Listen()
 func (s *TCPServer) Start() {
+	s.started = true
 	s.acceptor.Listen()
 	return
 }
@@ -93,6 +110,13 @@ func (s *TCPServer) SetWriteCompleteCallback(cb func(*TCPConnection)) {
 
 // RemoveConnection 删除connection
 func (s *TCPServer) RemoveConnection(conn *TCPConnection) {
+	s.mutex.Lock()
 	delete(s.connectionMap, conn.Name())
-	s.loop.removeChannel(conn.channel)
+	s.mutex.Unlock()
+
+	// 保证在loop->poller 中的删除是线程安全的
+	s.loop.runInLoop(conn.loop, func() {
+		conn.loop.removeChannel(conn.channel)
+		conn.loop.connectNum--
+	})
 }
